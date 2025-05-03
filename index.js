@@ -58,8 +58,8 @@ function extractTextFromResult(result) {
 async function callGpt4Api(prompt, isSynthesis = false) {
     const userId = generateUserId();
     const systemMessage = isSynthesis
-        ? "You are an expert code synthesizer. Analyze the user's request and the provided code suggestions. Create a single, final, improved code solution that best addresses the user's request, incorporating the best elements from the suggestions while ensuring correctness, robustness, modern style, and completeness. Output *only* the final code block or explanation requested."
-        : "You are a helpful assistant specialized in generating professional, robust, and modern code.";
+        ? "You are an expert front-end developer. Combine the following website ideas into a single, clean, modern HTML/CSS/JS website in one file. Output only the full code of the site."
+        : "You are a professional front-end developer. Write a complete single-file website (HTML with embedded CSS and JS) based on the prompt. Output only the full code.";
 
     const data = {
         prompt: prompt,
@@ -118,7 +118,7 @@ const app = express();
 app.use(express.json());
 
 // --- API Endpoint Definition ---
-app.post('/generate-synthesized-code', async (req, res) => {
+app.post('/generate', async (req, res) => {
     const userPrompt = req.body.prompt;
 
     if (!userPrompt || typeof userPrompt !== 'string' || userPrompt.trim() === '') {
@@ -165,23 +165,23 @@ app.post('/generate-synthesized-code', async (req, res) => {
         // --- Step 2: Synthesize the results ---
         console.log("--- Starting Synthesis Phase ---");
         const synthesisPrompt = `
-Original User Request:
+User Request:
 "${userPrompt}"
 
---- Initial AI Suggestions ---
+--- Initial Suggestions ---
 
-Suggestion from GPT-4:
+From GPT-4:
 ${gpt4Text}
 
-Suggestion from Gemini:
+From Gemini:
 ${geminiText}
 
-Suggestion from Llama 3:
+From LLaMA3:
 ${llama3Text}
 
 --- Task ---
-Based on the Original User Request and the suggestions above, please synthesize them into a single, final, improved, and coherent code solution. Focus on correctness, robustness, modern best practices, and completeness. If the suggestions are poor or conflicting, generate the best possible code based solely on the original request. Output *only* the final code block or explanation.
-        `;
+Based on the above suggestions, build a **single-page website** using modern HTML, CSS, and JavaScript. Include everything in one HTML file. Prioritize design quality, responsiveness, and code clarity. Do not include explanation, just return the complete HTML code.
+`;
 
         const synthesisResult = await callGpt4Api(synthesisPrompt, true); // Synthesis call
 
@@ -237,7 +237,7 @@ Based on the Original User Request and the suggestions above, please synthesize 
 
 // Simple root endpoint
 app.get('/', (req, res) => {
-    res.send('AI Code Synthesis Webservice is running. Use POST /generate-synthesized-code with a JSON body like {"prompt": "your code request"}');
+    res.send('AI Code Synthesis Webservice is running. Use POST /generate with a JSON body like {"prompt": "your code request"}');
 });
 
 // --- Start the Server ---
