@@ -1,247 +1,155 @@
 // Import necessary libraries
 const express = require('express');
 const axios = require('axios');
-const crypto = require('crypto'); // For generating a simple user ID
 
 // --- Configuration ---
 const PORT = process.env.PORT || 3000; // Port to run the server on
 const API_TIMEOUT = 90000; // Increased timeout for potentially longer calls (90 seconds)
 
-// API Endpoint Configurations
-const GPT4_API_CONFIG = {
-    url: "https://api.binjie.fun/api/generateStream",
-    headers: {
-        "authority": "api.binjie.fun",
-        "accept": "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9",
-        "origin": "https://chat18.aichatos.xyz",
-        "referer": "https://chat18.aichatos.xyz/",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Safari/537.36",
-        "Content-Type": "application/json"
-    }
-};
-
+// API Endpoint Configuration (Only Gemini)
 const GEMINI_API_CONFIG = {
-    url: "https://gem-ehsan.vercel.app/gemini/chat",
-    model: "2"
+    url: "https://gem-ehsan.vercel.app/gemini/chat", // URL API جمینی
+    model: "2" // مشخص کردن مدل جمینی
 };
 
-const LLAMA3_API_CONFIG = {
-    url: "https://lama-ehsan.vercel.app/chat",
-    model: "llama3-free"
-};
+// --- Helper Functions ---
 
-// --- Helper Functions for API Calls ---
-
-function generateUserId() {
-    return `web-${crypto.randomBytes(8).toString('hex')}`;
-}
-
-// Helper to safely extract text content from potentially varied API responses
+// Helper to safely extract text content from API responses
+// ** مهم: این تابع ممکن است نیاز به تنظیم دقیق‌تر بر اساس ساختار واقعی پاسخ API جمینی داشته باشد **
 function extractTextFromResult(result) {
-    if (!result || typeof result === 'string') {
-        return result || ''; // Return the string or empty if null/undefined
+    if (!result) {
+        return ''; // اگر نتیجه‌ای وجود ندارد، رشته خالی برگردان
+    }
+    if (typeof result === 'string') {
+        return result; // اگر نتیجه خودش رشته است، آن را برگردان
     }
     if (typeof result === 'object') {
-        // ** CRITICAL: Adjust these based on actual API response structures **
+        // تلاش برای یافتن متن در فیلدهای رایج پاسخ
         if (result.text) return result.text;
         if (result.response) return result.response;
-        if (result.message && result.message.content) return result.message.content; // Common structure
-        if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) return result.choices[0].message.content; // Another common structure
-        // Fallback: Convert the whole object to string (might be noisy)
-        return JSON.stringify(result);
+        if (result.message && result.message.content) return result.message.content;
+        if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts[0] && result.candidates[0].content.parts[0].text) {
+             return result.candidates[0].content.parts[0].text; // ساختار رایج Google AI Gemini API
+        }
+        // فال‌بک: کل شیء را به رشته تبدیل کن (ممکن است خروجی ناخوانا باشد)
+        // از تبدیل مستقیم به JSON اجتناب می‌کنیم تا فقط متن اصلی استخراج شود در صورت امکان
+        console.warn("Could not find standard text field in Gemini response:", result);
+        return JSON.stringify(result); // به عنوان آخرین راه حل
     }
-    return ''; // Return empty for other types
+    return ''; // برای انواع دیگر داده، رشته خالی برگردان
 }
 
-
-async function callGpt4Api(prompt, isSynthesis = false) {
-    const userId = generateUserId();
-    const systemMessage = isSynthesis
-        ? "You are an expert front-end developer. Combine the following website ideas into a single, clean, modern HTML/CSS/JS website in one file. Output only the full code of the site."
-        : "You are a professional front-end developer. Write a complete single-file website (HTML with embedded CSS and JS) based on the prompt. Output only the full code.";
-
-    const data = {
-        prompt: prompt,
-        userId: userId,
-        network: true,
-        system: systemMessage,
-        withoutContext: !isSynthesis, // Maintain context if synthesizing
-        stream: false
-    };
-
-    try {
-        console.log(`Calling GPT-4 API (${isSynthesis ? 'Synthesis' : 'Initial'})`);
-        const response = await axios.post(GPT4_API_CONFIG.url, data, { headers: GPT4_API_CONFIG.headers, timeout: API_TIMEOUT });
-        console.log(`GPT-4 API (${isSynthesis ? 'Synthesis' : 'Initial'}) Response Status:`, response.status);
-        return response.data; // Adjust extraction if needed, see extractTextFromResult
-    } catch (error) {
-        console.error(`Error calling GPT-4 API (${isSynthesis ? 'Synthesis' : 'Initial'}):`, error.response ? error.response.data : error.message);
-        return { error: `Failed to get response from GPT-4 API (${isSynthesis ? 'Synthesis' : 'Initial'}).`, details: error.message };
-    }
-}
-
+// Function to call the Gemini API
 async function callGeminiApi(prompt) {
+    // ساخت پرامپت واضح برای جمینی جهت تولید کد و فقط کد
+    const fullPrompt = `
+You are an expert front-end developer.
+Create a complete single-file website (HTML with embedded CSS and JS) based on the following user request.
+Output ONLY the raw, complete HTML code, starting exactly with <!DOCTYPE html> and ending exactly with </html>.
+Do not include any explanations, comments before or after the code, or markdown formatting like \`\`\`html or \`\`\`.
+
+User Request: "${prompt}"
+`.trim(); // trim() برای حذف فضاهای خالی احتمالی اول و آخر
+
     const data = {
-        prompt: prompt,
+        prompt: fullPrompt,
         model: GEMINI_API_CONFIG.model
     };
     try {
-        console.log(`Calling Gemini API`);
+        console.log(`Calling Gemini API with model ${GEMINI_API_CONFIG.model}`);
         const response = await axios.post(GEMINI_API_CONFIG.url, data, { timeout: API_TIMEOUT });
         console.log("Gemini API Response Status:", response.status);
-        return response.data; // Adjust extraction if needed, see extractTextFromResult
+        // استخراج مستقیم متن/کد از پاسخ
+        let extractedCode = extractTextFromResult(response.data);
+
+        // تلاش برای پاک‌سازی بیشتر (حذف احتمالی markdown code blocks اگر API اضافه کرده باشد)
+        extractedCode = extractedCode.replace(/^```html\s*|\s*```$/g, '').trim();
+
+        // بررسی اولیه برای اطمینان از اینکه شبیه کد HTML است
+        if (!extractedCode.toLowerCase().startsWith('<!doctype html') || !extractedCode.toLowerCase().endsWith('</html>')) {
+             console.warn("Gemini response might not be complete HTML:", extractedCode.substring(0, 100) + "...");
+             // اینجا می‌توانید تصمیم بگیرید که خطا برگردانید یا همان خروجی ناقص را بفرستید
+             // return { error: "Gemini did not return valid HTML code." };
+        }
+
+        return extractedCode; // فقط کد استخراج شده را برگردان
+
     } catch (error) {
         console.error("Error calling Gemini API:", error.response ? error.response.data : error.message);
+        // برگرداندن یک شیء خطا برای مدیریت در endpoint
         return { error: "Failed to get response from Gemini API.", details: error.message };
-    }
-}
-
-async function callLlama3Api(prompt) {
-    const data = {
-        model: LLAMA3_API_CONFIG.model,
-        prompt: prompt
-    };
-    try {
-        console.log(`Calling Llama3 API`);
-        const response = await axios.post(LLAMA3_API_CONFIG.url, data, { timeout: API_TIMEOUT });
-        console.log("Llama3 API Response Status:", response.status);
-        return response.data; // Adjust extraction if needed, see extractTextFromResult
-    } catch (error) {
-        console.error("Error calling Llama3 API:", error.response ? error.response.data : error.message);
-        return { error: "Failed to get response from Llama3 API.", details: error.message };
     }
 }
 
 // --- Express Application Setup ---
 const app = express();
-app.use(express.json());
+app.use(express.json()); // برای خواندن JSON body در درخواست‌های POST
 
 // --- API Endpoint Definition ---
-app.post('/generate', async (req, res) => {
-    const userPrompt = req.body.prompt;
+app.all('/generate', async (req, res) => { // .all برای پذیرش GET و POST
+    let userPrompt = '';
 
-    if (!userPrompt || typeof userPrompt !== 'string' || userPrompt.trim() === '') {
-        return res.status(400).json({ error: "Missing or invalid 'prompt' in request body." });
+    // دریافت پرامپت بر اساس نوع درخواست (GET یا POST)
+    if (req.method === 'POST') {
+        userPrompt = req.body.prompt;
+    } else if (req.method === 'GET') {
+        userPrompt = req.query.prompt;
     }
 
-    console.log(`Received synthesis request for prompt: "${userPrompt}"`);
+    // اعتبارسنجی پرامپت
+    if (!userPrompt || typeof userPrompt !== 'string' || userPrompt.trim() === '') {
+        return res.status(400).json({ error: "Missing or invalid 'prompt'. Use POST with JSON body {'prompt': '...'} or GET with query parameter ?prompt=..." });
+    }
 
-    let initialResults;
-    let initialGpt4Output, initialGeminiOutput, initialLlama3Output;
-    let gpt4Text = 'No response or error.', geminiText = 'No response or error.', llama3Text = 'No response or error.';
+    console.log(`Received generation request via ${req.method} for prompt: "${userPrompt}"`);
 
     try {
-        // --- Step 1: Get initial responses ---
-        console.log("--- Starting Initial Generation Phase ---");
-        initialResults = await Promise.all([
-            callGpt4Api(userPrompt, false), // Initial call
-            callGeminiApi(userPrompt),
-            callLlama3Api(userPrompt)
-        ]);
-        console.log("--- Finished Initial Generation Phase ---");
+        // --- Step 1: Call Gemini API ---
+        const geminiResult = await callGeminiApi(userPrompt);
 
-        initialGpt4Output = initialResults[0];
-        initialGeminiOutput = initialResults[1];
-        initialLlama3Output = initialResults[2];
-
-        // Extract text from initial results - ** Adjust logic based on actual API responses **
-        gpt4Text = extractTextFromResult(initialGpt4Output);
-        geminiText = extractTextFromResult(initialGeminiOutput);
-        llama3Text = extractTextFromResult(initialLlama3Output);
-
-        // Check if all initial calls failed
-        if (initialGpt4Output?.error && initialGeminiOutput?.error && initialLlama3Output?.error) {
-             return res.status(502).json({
-                error: "All initial AI models failed to respond.",
-                details: {
-                    gpt4: initialGpt4Output,
-                    gemini: initialGeminiOutput,
-                    llama3: initialLlama3Output
-                }
-             });
+        // --- Step 2: Handle Response ---
+        if (geminiResult && typeof geminiResult === 'object' && geminiResult.error) {
+            // اگر تابع callGeminiApi یک شیء خطا برگرداند
+            console.error("Gemini API call failed:", geminiResult);
+            return res.status(502).json({ // 502 Bad Gateway مناسب است وقتی سرویس خارجی خطا می‌دهد
+                error: "Failed to generate code using the AI model.",
+                details: geminiResult // شامل جزئیات خطا از API جمینی
+            });
         }
 
-        // --- Step 2: Synthesize the results ---
-        console.log("--- Starting Synthesis Phase ---");
-        const synthesisPrompt = `
-User Request:
-"${userPrompt}"
-
---- Initial Suggestions ---
-
-From GPT-4:
-${gpt4Text}
-
-From Gemini:
-${geminiText}
-
-From LLaMA3:
-${llama3Text}
-
---- Task ---
-Based on the above suggestions, build a **single-page website** using modern HTML, CSS, and JavaScript. Include everything in one HTML file. Prioritize design quality, responsiveness, and code clarity. Do not include explanation, just return the complete HTML code.
-`;
-
-        const synthesisResult = await callGpt4Api(synthesisPrompt, true); // Synthesis call
-
-        console.log("--- Finished Synthesis Phase ---");
-
-        // Extract final synthesized text - ** Adjust logic based on actual API response **
-        const synthesizedCode = extractTextFromResult(synthesisResult);
-
-        // --- Step 3: Format and Send Response ---
-        const responsePayload = {
-            prompt: userPrompt,
-            synthesized_output: synthesisResult?.error ? { error: "Synthesis failed.", details: synthesisResult } : synthesizedCode,
-            initial_outputs: { // Include initial outputs for reference
-                gpt4: initialGpt4Output,
-                gemini: initialGeminiOutput,
-                llama3: initialLlama3Output
-            },
-            timestamp: new Date().toISOString()
-        };
-
-        const acceptHeader = req.headers.accept || '';
-        const outputFormat = req.query.format || (acceptHeader.includes('text/plain') ? 'txt' : 'json');
-
-        if (outputFormat.toLowerCase() === 'txt') {
-            let txtOutput = `--- Prompt ---\n${responsePayload.prompt}\n\n`;
-            txtOutput += `--- Synthesized Output ---\n${JSON.stringify(responsePayload.synthesized_output, null, 2)}\n\n`;
-            txtOutput += `--- Initial GPT-4 Output ---\n${JSON.stringify(responsePayload.initial_outputs.gpt4, null, 2)}\n\n`;
-            txtOutput += `--- Initial Gemini Output ---\n${JSON.stringify(responsePayload.initial_outputs.gemini, null, 2)}\n\n`;
-            txtOutput += `--- Initial Llama3 Output ---\n${JSON.stringify(responsePayload.initial_outputs.llama3, null, 2)}\n\n`;
-            txtOutput += `Timestamp: ${responsePayload.timestamp}`;
-
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.send(txtOutput);
-        } else {
-            res.setHeader('Content-Type', 'application/json; charset=utf-8');
-            res.json(responsePayload);
+        // بررسی مجدد که آیا نتیجه‌ای دریافت شده
+        if (!geminiResult || typeof geminiResult !== 'string' || geminiResult.trim() === '') {
+             console.error("Received empty or invalid code from Gemini.");
+             return res.status(500).json({ error: "AI model returned empty or invalid content." });
         }
+
+
+        // --- Step 3: Send the generated code directly ---
+        // تنظیم هدر برای ارسال مستقیم کد HTML
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(geminiResult); // ارسال مستقیم کد HTML به عنوان پاسخ
 
     } catch (error) {
-        // Catch unexpected errors during the process
-        console.error("Error processing /generate-synthesized-code request:", error);
+        // گرفتن خطاهای غیرمنتظره در طول پردازش
+        console.error("Error processing /generate request:", error);
         res.status(500).json({
-             error: "An internal server error occurred during synthesis.",
-             details: error.message,
-             initial_outputs_received: { // Include whatever was received before the error
-                gpt4: initialGpt4Output || "Not retrieved",
-                gemini: initialGeminiOutput || "Not retrieved",
-                llama3: initialLlama3Output || "Not retrieved"
-             }
+             error: "An internal server error occurred during code generation.",
+             details: error.message
         });
     }
 });
 
 // Simple root endpoint
 app.get('/', (req, res) => {
-    res.send('AI Code Synthesis Webservice is running. Use POST /generate with a JSON body like {"prompt": "your code request"}');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(`AI Code Generation Webservice (using Gemini Model ${GEMINI_API_CONFIG.model}) is running.
+Use POST /generate with JSON body {"prompt": "your code request"}
+or GET /generate?prompt=your%20code%20request`);
 });
 
 // --- Start the Server ---
 app.listen(PORT, () => {
     console.log(`Webservice listening on port ${PORT}`);
-    console.log(`Send POST requests to http://localhost:${PORT}/generate-synthesized-code`);
+    console.log(`Send POST requests to http://localhost:${PORT}/generate with JSON body`);
+    console.log(`Or send GET requests to http://localhost:${PORT}/generate?prompt=...`);
 });
